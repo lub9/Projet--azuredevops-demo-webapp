@@ -1,0 +1,51 @@
+trigger:
+  - main
+
+pool:
+  vmImage: 'windows-latest'
+
+variables:
+  buildConfiguration: 'Release'
+
+stages:
+- stage: Build
+  displayName: "Build & Test"
+  jobs:
+    - job: Build
+      steps:
+      - task: UseDotNet@2
+        inputs:
+          packageType: 'sdk'
+          version: '8.0.x'
+      - script: dotnet restore
+      - script: dotnet build --configuration $(buildConfiguration)
+      - script: dotnet test tests/WebApp.Tests/WebApp.Tests.csproj --logger trx
+      - task: DotNetCoreCLI@2
+        inputs:
+          command: 'publish'
+          publishWebProjects: true
+          arguments: '--configuration $(buildConfiguration) --output $(Build.ArtifactStagingDirectory)'
+          zipAfterPublish: true
+      - publish: $(Build.ArtifactStagingDirectory)
+        artifact: drop
+
+- stage: Deploy
+  displayName: "Deploy to Azure"
+  dependsOn: Build
+  jobs:
+    - deployment: DeployWebApp
+      environment: 'dev'
+      strategy:
+        runOnce:
+          deploy:
+            steps:
+            - task: DownloadPipelineArtifact@2
+              inputs:
+                buildType: 'current'
+                artifactName: 'drop'
+                targetPath: '$(System.DefaultWorkingDirectory)'
+            - task: AzureWebApp@1
+              inputs:
+                azureSubscription: "<YOUR-SERVICE-CONNECTION>"
+                appName: "<YOUR-APP-SERVICE-NAME>"
+                package: "$(System.DefaultWorkingDirectory)/**/*.zip"
